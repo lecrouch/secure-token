@@ -8,22 +8,33 @@ const secureToken = require( "./secureToken" );
 
 app.post( "/secrets", function( req, res )
 {
-    let newToken = new secureToken( "secret data" );
-    res.send( "localhost:3000/secrets/" + newToken.getURL() );
+    let newToken = new secureToken();
+    newToken.storeObjectData( "secret data" )
+    .then( () => {
+        res.send( "localhost:3000/secrets/" + newToken.getURL() );
+    })
+    .catch( ( error ) => {
+        res.status( 500 );
+        res.send( error.message );
+    });
 });
 
 app.get( "/secrets/:token", function( req, res )
 {
     let token = req.params.token;
-    // wanted to run a 'fetch( token )' but just realized that I boned that hard...
     let data = secureToken.fetch( token );
-    if( data !== false )
+    if( data === "failed" )
     {
-        app.send( data );
+        res.send( "expired or not found" );
+    }
+    else if( data === "error" )
+    {
+        res.status( 500 );
+        res.send( "something real bad happened" );
     }
     else
     {
-        app.send( "shit's expired or not found" );
+        res.send( data );
     }
 });
 

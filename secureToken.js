@@ -2,35 +2,41 @@
 const Promise = require( "bluebird" );
 const sqlConnector = require( "./sqlConnector" );
 
-var connector = new sqlConnector(
+const connector = new sqlConnector(
     {
         host    : 'localhost',
-        user    : 'root',
-        password    : 'root',
+        user    : 'usr',
+        password    : 'pass',
         database    : 'secretStuff',
         port    : 8889
     });
 
 class secureToken
 {
-    constructor( stringIn )
+    constructor()
     {
-        do
-        {
-            this.url = randoString();
-        }
-        while( checkURL( this.url ) )
-
-        storeObjectData( this.url, getTime(), stringIn );
+        this.url = this._randomString();
     };
 
-    setToken( stringIn )
+    _queryHelper( query, fields )
     {
-        this.secretData = stringIn;
+        return new Promise( ( resolve, reject ) => {
+            connector.query( query, fields, ( error, results ) => {
+                if( error )
+                {
+                    connector.rollback( () => {
+                        reject( error );
+                    } );
+                }
+                else
+                {
+                    resolve( results );
+                }
+            });
+        });
     };
 
-    //  --- member functions ---
-    randoString()
+    _randomString()
     {
         const validChars = "abcdefghijklmnopqrstuvwxyz01234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ";
         let outputString = '';
@@ -44,107 +50,180 @@ class secureToken
     getURL()
     {
         return this.url;
-    };
-
-    checkURL( stringIn )
-    {
-        connector.connect();
-        connector.query( 'SELECT * FROM secretTable WHERE `generatedURL` = ' + stringIn, function( error, results, fields )
-        {
-            if( error )
-            {
-                throw error;
-            }
-            if( results.length === 0 )
-            {
-                connector.end();
-                return false;
-            }
-            else
-            {
-                connector.end();
-                return true;
-            }
-        });
-    };
+    }
 
     static fetch( urlIn )
     {
         connector.connect();
-        connection.query( 'SELECT * FROM secretTable WHERE `generatedURL` = ?', urlIn, function( error, results, fields)
-        {
-           if( error )
-           {
-               throw error;
-           }
-           if( results.length === 0 )
-           {
-               connector.end();
-               return false;
-           }
-           var row = JSON.parse( results[0] );
-        });
-
-        // protection from multiple views ( delete on first query )
-        connection.query( 'DELETE FROM secretTable WHERE `generatedURL` = ?', urlIn, function( error )
-        {
-            if( error )
+        let row;
+        return this._queryHelper( 'SELECT * FROM secretTable WHERE `generatedURL` = ?', urlIn )
+        .then( ( passedResults ) => {
+            if( passedResults )
             {
-                throw error;
+                row = JSON.parse( passedResults[0] );
             }
-        });
-
-        if( ( getTime() - row.time ) < 86400000 )
-        {
-            // valid 24 hour period
-            return row.data;
-        }
-        else
-        {
-            // invalid, can't have
-            return false;
-        }
-    };
-
-    _queryHelper( query, fields )
-    {
-        return new Promise( ( resolve, reject ) => {
-            connector.query( query, fields, ( error ) => {
-                if( error )
-                {
-                    connector.rollback( () => {
-                        reject( error );
-                    } );
-                }
-                resolve();
-            });
+            else
+            {
+                row.data = "failed";
+            }
+            return row;
+        })
+        .then( this.queryHelper( 'DELETE FROM secretTable WHERE `generatedURL` = ?', urlIn ) )
+        .then( () => {
+            if( (getTime() - row.time ) < 86400 )
+            {
+                // valid 24 hour period
+                return row.data;
+            }
+            else
+            {
+                // invalid, expired
+                row.data = "failed";
+                return row.data;
+            }
+        })
+        .catch( ( error ) => {
+            return "error";
         });
     };
 
-    storeObjectData( urlIn, timeIn, secretDataIn )
+    storeObjectData( secretDataIn )
     {
         connector.connect();
-        connector.beginTransaction( function( error )
-        {
-            if( error )
-            {
-                throw error;
-            }
-            this._queryHelper( 'INSERT INTO secretTable ( url, time, data ) VALUES ( ?, ? ,? )', [ urlIn, timeIn, secretDataIn ] );
 
-            connector.commit( function( error )
-            {
-                if( error )
-                {
-                    connector.rollback( function()
+        return new Promise( (resolve, reject ) => {
+            connector.beginTransaction( ( error ) => {
+                if( error ) return reject( error );
+                resolve();
+            });
+        })
+        .then(() => {
+            return this._queryHelper( 'INSERT INTO secretTable ( url, time, data ) VALUES ( ?, ? ,? )', [ this.url, getTime(), secretDataIn ] );
+        })
+        .then(() => {
+            return new Promise((resolve, reject) => {
+                connector.commit(( error ) => {
+                    if( error )
                     {
-                        throw error;
-                    });
-                }
-            }
+                        connector.rollback(() =>
+                        {
+                            reject();
+                        });
+                    }
+                    else
+                    {
+                        resolve();
+                    }
+                });
+            });
+        })
+        .then(() => {
+            connector.end();
         });
-        connector.end();
     };
+
+    // _setURL()
+    // {
+    //     do
+    //     {
+    //         let tmpString = this._randomString();
+    //     }
+    //     while( _checkURL( tmpString ) )
+    //
+    //     this.url = tmpString;
+    // };
+
+    // _checkURL( stringIn )
+    // {
+    //     connector.connect();
+    //
+    //     this._queryHelper( 'SELECT * FROM secretTable WHERE `generatedURL` = ?', stringIn )
+    //     .then( ( results ) => {
+    //             if( !results || results.length === 0 )
+    //             {
+    //                 connector.end();
+    //                 return false;
+    //             }
+    //             else
+    //             {
+    //                 connector.end();
+    //                 return true;
+    //             }
+    //     });
+    // };
+
+
+    // storeObjectData( urlIn, timeIn, secretDataIn )
+    // {
+    //     connector.connect();
+    //
+    //     return new Promise( (resolve, reject ) => {
+    //         connector.beginTransaction( ( error ) => {
+    //             if( error ) return reject( error );
+    //             resolve();
+    //         });
+    //     })
+    //
+    //     .then(() => {
+    //         return this._queryHelper( 'INSERT INTO secretTable ( url, time, data ) VALUES ( ?, ? ,? )', [ urlIn, timeIn, secretDataIn ] );
+    //     })
+    //
+    //     .then(() => {
+    //         return new Promise((resolve, reject) => {
+    //             connector.commit(( error ) => {
+    //                 if( error ) {
+    //                     connector.rollback(() => {
+    //                         reject();
+    //                     });
+    //                 } else {
+    //                     resolve();
+    //                 }
+    //             });
+    //         });
+    //     })
+    //
+    //     .then(() => {
+    //         connector.end();
+    //     });
+    // };
+
+    // static fetch( urlIn )
+    // {
+        // connector.connect();
+        // connection.query( 'SELECT * FROM secretTable WHERE `generatedURL` = ?', urlIn, function( error, results, fields)
+        // {
+        //     if( error )
+        //     {
+        //         throw error;
+        //     }
+        //     if( results.length === 0 )
+        //     {
+        //         connector.end();
+        //         return false;
+        //     }
+        //     var row = JSON.parse( results[0] );
+        // });
+        //
+        // // protection from multiple views ( delete on first query )
+        // connection.query( 'DELETE FROM secretTable WHERE `generatedURL` = ?', urlIn, function( error )
+        // {
+        //     if( error )
+        //     {
+        //         throw error;
+        //     }
+        // });
+        //
+        // if( ( getTime() - row.time ) < 86400000 )
+        // {
+        //     // valid 24 hour period
+        //     return row.data;
+        // }
+        // else
+        // {
+        //     // invalid, can't have
+        //     return false;
+        // }
+    // }
 }
 
 module.exports = secureToken;
