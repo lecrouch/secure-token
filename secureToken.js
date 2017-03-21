@@ -106,6 +106,21 @@ class secureToken
         }
     };
 
+    _queryHelper( query, fields )
+    {
+        return new Promise( ( resolve, reject ) => {
+            connector.query( query, fields, ( error ) => {
+                if( error )
+                {
+                    connector.rollback( () => {
+                        reject( error );
+                    } );
+                }
+                resolve();
+            });
+        });
+    };
+
     storeObjectData( urlIn, timeIn, secretDataIn )
     {
         connector.connect();
@@ -115,37 +130,9 @@ class secureToken
             {
                 throw error;
             }
-            connector.query( 'INSERT INTO secretTable SET url = ?', urlIn, function( error )
-            {
-                if( error )
-                {
-                    connector.rollback( function()
-                    {
-                       throw error;
-                    });
-                }
-            });
-            connector.query( 'INSERT INTO secretTable SET time = ?', timeIn, function( error )
-            {
-                if( error )
-                {
-                    connector.rollback( function()
-                    {
-                        throw error;
-                    });
-                }
-            });
-            connector.query( 'INSERT INTO secretTable SET data = ?', secretDataIn, function( error )
-            {
-                if( error )
-                {
-                    connector.rollback( function()
-                    {
-                       throw error;
-                    });
-                }
-            });
-            connector.commit( function( error ) )
+            this._queryHelper( 'INSERT INTO secretTable ( url, time, data ) VALUES ( ?, ? ,? )', [ urlIn, timeIn, secretDataIn ] );
+
+            connector.commit( function( error )
             {
                 if( error )
                 {
